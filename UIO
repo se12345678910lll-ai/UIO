@@ -1,0 +1,320 @@
+-- ==========================================
+-- UIO Script Hub (Roblox LocalScript)
+-- ==========================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- สถานะฟังก์ชัน (Config / State)
+local UIO_State = {
+	FlyEnabled = false,
+	FlySpeed = 50,
+
+	SpeedEnabled = false,
+	WalkSpeed = 32,
+
+	AutoCardTP = false,
+	AutoTreadmill = false,
+	AutoDoubleX2 = false,
+	AutoPlaceCard = false,
+}
+
+-- ==========================================
+-- Helper Functions สำหรับดึง Character
+-- ==========================================
+local function getCharacter()
+	return player.Character or player.CharacterAdded:Wait()
+end
+
+local function getHumanoid()
+	local char = getCharacter()
+	return char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRootPart()
+	local char = getCharacter()
+	return char:FindFirstChild("HumanoidRootPart")
+end
+
+-- ==========================================
+-- 1. ระบบบินได้ (ปรับความเร็วได้)
+-- ==========================================
+local bodyVelocity, bodyGyro
+
+local function setFly(enabled)
+	UIO_State.FlyEnabled = enabled
+	local root = getRootPart()
+	local hum = getHumanoid()
+	if not root or not hum then return end
+
+	if enabled then
+		hum.PlatformStand = true
+		bodyVelocity = Instance.new("BodyVelocity")
+		bodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+		bodyVelocity.Velocity = Vector3.zero
+		bodyVelocity.Parent = root
+
+		bodyGyro = Instance.new("BodyGyro")
+		bodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+		bodyGyro.P = 1e4
+		bodyGyro.CFrame = root.CFrame
+		bodyGyro.Parent = root
+	else
+		hum.PlatformStand = false
+		if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
+		if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
+	end
+end
+
+RunService.RenderStepped:Connect(function()
+	local root = getRootPart()
+	if not root then return end
+
+	-- อัปเดตทิศทางการบิน
+	if UIO_State.FlyEnabled and bodyVelocity and bodyGyro then
+		local moveDir = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += camera.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir -= camera.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir -= camera.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += camera.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir += Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveDir -= Vector3.new(0, 1, 0) end
+
+		if moveDir.Magnitude > 0 then
+			moveDir = moveDir.Unit
+		end
+		bodyVelocity.Velocity = moveDir * UIO_State.FlySpeed
+		bodyGyro.CFrame = camera.CFrame
+	end
+
+	-- อัปเดตความเร็วการวิ่ง
+	local hum = getHumanoid()
+	if hum and UIO_State.SpeedEnabled then
+		hum.WalkSpeed = UIO_State.WalkSpeed
+	end
+end)
+
+-- ==========================================
+-- 2. ระบบวิ่งเร็ว (ปรับความเร็วได้)
+-- ==========================================
+local function setSpeed(enabled)
+	UIO_State.SpeedEnabled = enabled
+	local hum = getHumanoid()
+	if not hum then return end
+
+	if enabled then
+		hum.WalkSpeed = UIO_State.WalkSpeed
+	else
+		hum.WalkSpeed = 16 -- ค่ามาตรฐานของ Roblox
+	end
+end
+
+-- ==========================================
+-- 3. วาปไปเก็บการ์ด
+-- *ปรับชื่อ Folder / Part การ์ดในแมปให้ตรงกับเกม*
+-- ==========================================
+local function tpToCardOnce()
+	local root = getRootPart()
+	if not root then return end
+
+	local cardsFolder = workspace:FindFirstChild("Cards") -- เปลี่ยนชื่อโฟลเดอร์การ์ดตามเกม
+	if cardsFolder then
+		for _, item in ipairs(cardsFolder:GetChildren()) do
+			local targetPart = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+			if targetPart then
+				root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+				task.wait(0.25)
+			end
+		end
+	end
+end
+
+task.spawn(function()
+	while true do
+		if UIO_State.AutoCardTP then
+			tpToCardOnce()
+		end
+		task.wait(1)
+	end
+end)
+
+-- ==========================================
+-- 4. ฟาร์มลู่วิ่ง (อัตโนมัติ)
+-- *ปรับตำแหน่งลู่วิ่ง หรือ RemoteEvent ตามเกม*
+-- ==========================================
+local treadmillCFrame = CFrame.new(0, 5, 0) -- เปลี่ยนพิกัดลู่วิ่งของเกม
+
+task.spawn(function()
+	while true do
+		if UIO_State.AutoTreadmill then
+			local root = getRootPart()
+			local hum = getHumanoid()
+			if root and hum then
+				-- วาปขึ้นลู่วิ่งหากอยู่ไกลเกินไป
+				if (root.Position - treadmillCFrame.Position).Magnitude > 8 then
+					root.CFrame = treadmillCFrame
+				end
+				-- จำลองการเดิน/วิ่งบนลู่วิ่ง
+				hum:Move(Vector3.new(0, 0, -1), true)
+			end
+		end
+		task.wait(0.1)
+	end
+end)
+
+-- ==========================================
+-- 5. กดคูณ 2 ในลู่วิ่ง
+-- *ปรับชื่อ RemoteEvent หรือปุ่ม UI ให้ตรงกับเกม*
+-- ==========================================
+task.spawn(function()
+	while true do
+		if UIO_State.AutoDoubleX2 and UIO_State.AutoTreadmill then
+			-- ตัวอย่างเรียกผ่าน RemoteEvent (เปลี่ยนชื่อให้ตรงกับเกม)
+			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+			local x2Event = remotes and remotes:FindFirstChild("DoubleX2")
+			if x2Event and x2Event:IsA("RemoteEvent") then
+				x2Event:FireServer()
+			end
+		end
+		task.wait(0.5)
+	end
+end)
+
+-- ==========================================
+-- 6. วางการ์ด (อัตโนมัติ)
+-- *ปรับชื่อ RemoteEvent / ตำแหน่งวางการ์ดให้ตรงกับเกม*
+-- ==========================================
+local placeCardCFrame = CFrame.new(10, 5, 10) -- เปลี่ยนพิกัดจุดวางการ์ด
+
+task.spawn(function()
+	while true do
+		if UIO_State.AutoPlaceCard then
+			local root = getRootPart()
+			if root then
+				-- หากต้องเดิน/วาปไปจุดวางการ์ดก่อน
+				-- root.CFrame = placeCardCFrame
+			end
+
+			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+			local placeEvent = remotes and remotes:FindFirstChild("PlaceCard")
+			if placeEvent and placeEvent:IsA("RemoteEvent") then
+				placeEvent:FireServer()
+			end
+		end
+		task.wait(0.5)
+	end
+end)
+
+-- ==========================================
+-- สร้างหน้าต่าง UI ชื่อ "UIO"
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "UIO_Hub"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 380)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -190)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 40)
+titleLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+titleLabel.Text = "UIO"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 20
+titleLabel.Parent = mainFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 6)
+listLayout.FillDirection = Enum.FillDirection.Vertical
+listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+listLayout.Parent = mainFrame
+
+local padding = Instance.new("UIPadding")
+padding.PaddingTop = UDim.new(0, 48)
+padding.Parent = mainFrame
+
+local function createToggle(text, callback)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0.9, 0, 0, 34)
+	btn.BackgroundColor3 = Color3.fromRGB(55, 55, 70)
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.Font = Enum.Font.GothamSemibold
+	btn.TextSize = 14
+	local active = false
+	btn.Text = text .. " : OFF"
+	btn.Parent = mainFrame
+
+	btn.MouseButton1Click:Connect(function()
+		active = not active
+		btn.Text = text .. (active and " : ON" or " : OFF")
+		btn.BackgroundColor3 = active and Color3.fromRGB(45, 140, 85) or Color3.fromRGB(55, 55, 70)
+		callback(active)
+	end)
+end
+
+local function createAdjustRow(labelText, defaultVal, step, onChange)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(0.9, 0, 0, 32)
+	row.BackgroundColor3 = Color3.fromRGB(38, 38, 48)
+	row.Parent = mainFrame
+
+	local val = defaultVal
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(0.55, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextColor3 = Color3.fromRGB(230, 230, 230)
+	lbl.Font = Enum.Font.Gotham
+	lbl.TextSize = 13
+	lbl.Text = labelText .. ": " .. tostring(val)
+	lbl.Parent = row
+
+	local minusBtn = Instance.new("TextButton")
+	minusBtn.Size = UDim2.new(0.2, 0, 0.8, 0)
+	minusBtn.Position = UDim2.new(0.56, 0, 0.1, 0)
+	minusBtn.Text = "-"
+	minusBtn.Parent = row
+
+	local plusBtn = Instance.new("TextButton")
+	plusBtn.Size = UDim2.new(0.2, 0, 0.8, 0)
+	plusBtn.Position = UDim2.new(0.78, 0, 0.1, 0)
+	plusBtn.Text = "+"
+	plusBtn.Parent = row
+
+	minusBtn.MouseButton1Click:Connect(function()
+		val = math.max(step, val - step)
+		lbl.Text = labelText .. ": " .. tostring(val)
+		onChange(val)
+	end)
+
+	plusBtn.MouseButton1Click:Connect(function()
+		val = val + step
+		lbl.Text = labelText .. ": " .. tostring(val)
+		onChange(val)
+	end)
+end
+
+-- ปุ่มควบคุมทั้ง 6 ฟังก์ชัน
+createToggle("บินได้", function(v) setFly(v) end)
+createAdjustRow("ความเร็วบิน", UIO_State.FlySpeed, 10, function(v) UIO_State.FlySpeed = v end)
+
+createToggle("วิ่งเร็ว", function(v) setSpeed(v) end)
+createAdjustRow("ความเร็ววิ่ง", UIO_State.WalkSpeed, 4, function(v) UIO_State.WalkSpeed = v end)
+
+createToggle("วาปไปเก็บการ์ด", function(v) UIO_State.AutoCardTP = v end)
+createToggle("ฟาร์มลู่วิ่ง (อัตโนมัติ)", function(v) UIO_State.AutoTreadmill = v end)
+createToggle("กดคูณ2ในลู่วิ่ง", function(v) UIO_State.AutoDoubleX2 = v end)
+createToggle("วางการ์ด (อัตโนมัติ)", function(v) UIO_State.AutoPlaceCard = v end)
